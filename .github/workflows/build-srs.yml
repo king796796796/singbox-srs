@@ -1,0 +1,37 @@
+name: build-srs
+on:
+  schedule: [{cron: "0 20 * * *"}]
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install sing-box
+        run: |
+          V=$(curl -sIL -o /dev/null -w '%{url_effective}' \
+              https://github.com/SagerNet/sing-box/releases/latest | sed 's#.*/v##')
+          curl -sL "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-linux-amd64.tar.gz" \
+            | tar xz --strip-components=1 -C /usr/local/bin sing-box-$V-linux-amd64/sing-box
+      - name: fetch + compile
+        run: |
+          mkdir -p srs && cd srs
+          B=https://raw.githubusercontent.com/SukkaLab/ruleset.skk.moe/master/sing-box
+          for p in non_ip/lan non_ip/apple_cn non_ip/reject-drop non_ip/reject-no-drop \
+                   non_ip/reject non_ip/sogouinput non_ip/direct non_ip/cdn non_ip/download \
+                   non_ip/stream non_ip/telegram non_ip/global non_ip/domestic \
+                   domainset/speedtest domainset/cdn domainset/download \
+                   ip/reject ip/telegram ip/stream ip/lan ip/domestic; do
+            n=${p/\//-}
+            curl -sfL -o "$n.json" "$B/$p.json" || exit 1
+            sing-box rule-set compile "$n.json" -o "$n.srs"
+            rm "$n.json"
+          done
+      - name: commit
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add srs
+          git diff --cached --quiet || git commit -m "srs $(date -u +%F)"
+          git push
